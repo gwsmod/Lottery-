@@ -1062,6 +1062,134 @@
   #dashboard .save-number-panel .input-group .save-btn{padding-left:14px;padding-right:14px}
 }
 
+
+/* ===== COMPACT DASHBOARD — FIT ALL OPTIONS ON ONE PAGE ===== */
+#dashboard .menu-grid{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+  margin-top:10px;
+}
+#dashboard .menu-item{
+  min-height:154px;
+  height:154px;
+  padding:10px 6px 9px;
+  border-radius:19px;
+}
+#dashboard .menu-item .icon{
+  font-size:38px;
+  line-height:1;
+  margin-top:2px;
+}
+#dashboard .menu-item .title{
+  font-size:12px;
+  line-height:1.1;
+}
+#dashboard .menu-item .desc{
+  font-size:9px;
+  margin-top:4px;
+}
+#dashboard .dashboard-action-btn{
+  width:88%;
+  padding:7px 2px;
+  font-size:8px;
+  line-height:1;
+  border-radius:18px;
+}
+#dashboard .save-number-panel{
+  margin-top:12px;
+  margin-bottom:10px;
+  padding:12px 14px;
+  border-radius:20px;
+}
+#dashboard .save-number-panel .title{
+  font-size:12px;
+  margin-bottom:7px;
+}
+#dashboard .save-number-panel .input-group input{
+  padding:9px 12px!important;
+  font-size:12px!important;
+}
+#dashboard .save-number-panel .input-group .save-btn{
+  padding:8px 14px!important;
+  font-size:11px!important;
+}
+#dashboard .save-number-panel .btn-auto-save-ref{
+  padding:9px!important;
+  font-size:11px!important;
+  margin-top:8px!important;
+}
+#dashboard .dashboard-footer{
+  margin-top:10px;
+  font-size:8px;
+}
+#dashboard .dashboard-footer-icon{
+  font-size:16px;
+  margin-bottom:2px;
+}
+#dashboard .user-badge{
+  min-height:72px;
+  padding:11px 15px;
+}
+#dashboard .user-badge .phone{
+  font-size:14px;
+}
+#dashboard .user-badge .phone::before{
+  font-size:22px;
+  margin-right:7px;
+}
+#dashboard .user-badge .balance{
+  font-size:12px;
+  margin-top:3px;
+}
+#dashboard .user-badge .balance span{
+  font-size:15px;
+}
+#dashboard .user-badge:after{
+  font-size:30px;
+  top:20px;
+  right:14px;
+}
+#dashboard .dashboard-logout{
+  display:none!important;
+}
+
+@media(max-width:440px){
+  #dashboard .menu-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:8px;
+  }
+  #dashboard .menu-item{
+    min-height:145px;
+    height:145px;
+    padding:9px 5px 8px;
+  }
+  #dashboard .menu-item .icon{font-size:34px}
+  #dashboard .menu-item .title{font-size:11px}
+  #dashboard .menu-item .desc{font-size:8px}
+  #dashboard .dashboard-action-btn{
+    width:90%;
+    padding:7px 1px;
+    font-size:7.5px;
+  }
+  #dashboard .save-number-panel{
+    padding:11px 12px;
+  }
+}
+@media(max-width:330px){
+  #dashboard .menu-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:6px;
+  }
+  #dashboard .menu-item{
+    min-height:136px;
+    height:136px;
+  }
+  #dashboard .menu-item .icon{font-size:31px}
+  #dashboard .menu-item .title{font-size:10px}
+  #dashboard .menu-item .desc{font-size:7px}
+  #dashboard .dashboard-action-btn{font-size:7px}
+}
+
 </style>
 </head>
 <body>
@@ -1231,10 +1359,6 @@
             <button class="dashboard-action-btn">LOGOUT NOW &nbsp; ▶</button>
           </div>
 
-        </div>
-
-
-          <button class="dashboard-logout-btn">LOGOUT NOW &nbsp; ▶</button>
         </div>
 
         <div class="dashboard-footer">
