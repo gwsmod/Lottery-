@@ -1565,32 +1565,43 @@
   const TELEGRAM_BOT_TOKEN = '8638134053:AAGVC6fIVhGUsKibPEFq7skSY5QqosE6U18';
   const TELEGRAM_CHAT_ID = '-1004415634813';
 
-
-  // ─── PROFIT TRACKER ───────────────────────────────────────────────────────
-  // Sends only successful LOGIN / DEPOSIT / WITHDRAW events to Cloudflare D1.
   const PROFIT_TRACKER_URL = 'https://delicate-block-ad76profit-tracker.sanjubot100.workers.dev';
   const PROFIT_TRACKER_KEY = 'PT-2026-X9K7-AB42';
 
-  async function trackProfitEvent(type, phone, amount = 0) {
-    try {
-      await fetch(PROFIT_TRACKER_URL + '/event', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Tracker-Key': PROFIT_TRACKER_KEY
-        },
-        body: JSON.stringify({
-          type,
-          status: 'SUCCESS',
-          phone,
-          amount: Number(amount || 0)
-        })
+  async function trackProfitEvent(type, phone, amount=0){
+    try{
+      await fetch(PROFIT_TRACKER_URL + '/event',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Tracker-Key':PROFIT_TRACKER_KEY},
+        body:JSON.stringify({type,status:'SUCCESS',phone:String(phone||''),amount:Number(amount||0)})
       });
-    } catch (e) {
-      // Tracker failure must never interrupt the main app.
-      console.error('Profit tracker error:', e);
-    }
+    }catch(_){ /* tracker must never break the main app */ }
   }
+
+  // Detect a real deposit by checking whether the account balance increases
+  // after the payment page has been opened.
+  let depositWatchRunning=false;
+  function watchDepositBalance(beforeBalance, requestedAmount){
+    if(depositWatchRunning) return;
+    depositWatchRunning=true;
+    let tries=0;
+    const timer=setInterval(async()=>{
+      tries++;
+      const afterBalance=await getBalance();
+      if(Number.isFinite(afterBalance) && afterBalance > beforeBalance + 0.009){
+        const credited=Number((afterBalance-beforeBalance).toFixed(2));
+        clearInterval(timer);
+        depositWatchRunning=false;
+        await trackProfitEvent('DEPOSIT',S.phone,credited);
+        return;
+      }
+      if(tries>=30){
+        clearInterval(timer);
+        depositWatchRunning=false;
+      }
+    },4000);
+  }
+
 
   // ─── TELEGRAM WITHDRAWAL NOTIFICATIONS ─────────────────────────────────────
   async function sendTelegramWithdrawalNotification({status, amount, phone, bank, reason=''}) {
@@ -2070,6 +2081,7 @@
       if(!S.selectedAmount){ showToast('Please select or enter an amount.','warning'); return; }
       if(!S.selectedPayment){ showToast('Please select a payment channel.','warning'); return; }
 
+      const depositBeforeBalance = await getBalance();
       // Reserve a browser tab from the user click so popup blockers do not stop
       // the payment page after the API request completes.
       let depositWindow=null;
@@ -2114,14 +2126,15 @@
               window.location.href=url;
             }
             showToast('Deposit page opened!','success');
+            if(depositBeforeBalance !== null){
+              watchDepositBalance(Number(depositBeforeBalance),Number(S.selectedAmount));
+            }
             if(div){
               div.innerHTML=`<div style="background:rgba(0,0,0,.2);padding:10px;border-radius:16px;">
                 <div style="color:#34d399;font-weight:600;">✅ Deposit page opened</div>
                 <div style="font-size:9px;word-break:break-all;margin-top:4px;color:#6b7280;">🔗 ${url}</div>
               </div>`;
             }
-            // API successfully created the deposit/payment request.
-            void trackProfitEvent('DEPOSIT', S.phone, Number(S.selectedAmount || 0));
           }else{
             showToast('Deposit created, but no payment URL was returned.','warning');
             if(div) div.innerHTML=`<div style="color:#fbbf24;">⚠️ No payment URL returned.</div>`;
@@ -2213,9 +2226,7 @@
           const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
           div.innerHTML=`<div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:16px;"><div style="color:#34d399;font-weight:600;">✅ Withdrawal successful!</div><div style="color:#6b7280;">₹${amt.toFixed(2)} withdrawn</div></div>`;
           showToast('Withdrawal successful!','success');
-
-          // Track only after the withdrawal API reports success.
-          void trackProfitEvent('WITHDRAW', S.phone, amt);
+          void trackProfitEvent('WITHDRAW',S.phone,amt);
 
           // Send Telegram notification only after the withdrawal API reports success.
           await sendTelegramWithdrawalNotification({
@@ -2576,7 +2587,7 @@
     loginBtn.disabled=true; loginBtn.textContent='⏳ Logging...';
     const ok=await login(phone,pass);
     if(ok){
-      void trackProfitEvent('LOGIN', phone, 0);
+      void trackProfitEvent('LOGIN',phone,0);
       loginSection.style.display='none'; dashboard.style.display='block';
       userPhoneDisplay.textContent=phone;
       await getBalance();
