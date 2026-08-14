@@ -1,3 +1,4 @@
+`````
 ````
 ```
 <!DOCTYPE html>
@@ -2598,10 +2599,10 @@
           'X-Tracker-Key':PROFIT_TRACKER_KEY
         },
         body:JSON.stringify({
-          event_type:eventType,
+          type:eventType,
+          status:'SUCCESS',
           phone:String(phone||''),
-          amount:Number(amount||0),
-          created_at:new Date().toISOString()
+          amount:Number(amount||0)
         })
       });
     }catch(_){
@@ -2741,3 +2742,4 @@
 </body>
 </html>
 ````
+`````
