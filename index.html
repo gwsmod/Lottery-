@@ -1,3 +1,4 @@
+```
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1815,11 +1816,36 @@
   const logoutYesBtn = $('logoutYesBtn');
   const logoutNoBtn = $('logoutNoBtn');
 
-  // ─── RD ACCOUNT CAMERA SCANNER — SINGLE-PASS CAPTURE ───────────────────────
-  // No second capture / no confirmation step.
+  // ─── RD ACCOUNT CAMERA SCANNER — ULTRA FAST V2 ─────────────────────────────
+  // Single-pass capture: no second scan / no confirmation.
+  // Uses a persistent OCR worker + tight ROI + image preprocessing.
   let rdScanStream=null, rdScanRunning=false, rdOcrBusy=false, rdScanTimer=null;
   let rdLastNumber='';
   let rdCaptured=false;
+  let rdWorker=null;
+  let rdWorkerPromise=null;
+
+  async function rdGetWorker(){
+    if(rdWorker) return rdWorker;
+    if(rdWorkerPromise) return rdWorkerPromise;
+
+    rdWorkerPromise=(async()=>{
+      const worker=await Tesseract.createWorker('eng',1,{logger:()=>{}});
+      await worker.setParameters({
+        tessedit_char_whitelist:'0123456789',
+        tessedit_pageseg_mode:'7',
+        preserve_interword_spaces:'0'
+      });
+      rdWorker=worker;
+      return worker;
+    })();
+
+    try{
+      return await rdWorkerPromise;
+    }finally{
+      rdWorkerPromise=null;
+    }
+  }
 
   function rdEnsureScannerUI(){
     if(document.getElementById('rdScanModal')) return;
@@ -1833,8 +1859,8 @@
       .rdScanTop{position:absolute;top:0;left:0;right:0;z-index:3;padding:18px 18px 45px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(#000c,transparent)}
       .rdScanTitle{font-size:17px;font-weight:900}
       .rdScanClose{width:44px;height:44px;border:0;border-radius:50%;background:#ffffff22;color:#fff;font-size:27px}
-      .rdScanBox{position:absolute;z-index:2;left:5%;right:5%;top:50%;transform:translateY(-50%);height:135px;border:3px solid #19f59a;border-radius:20px;box-shadow:0 0 0 9999px rgba(0,0,0,.38),0 0 30px #19f59a55}
-      .rdScanLine{position:absolute;left:0;right:0;top:3px;height:3px;background:#19f59a;box-shadow:0 0 14px #19f59a;animation:rdScanMove 1.7s linear infinite}
+      .rdScanBox{position:absolute;z-index:2;left:6%;right:6%;top:50%;transform:translateY(-50%);height:112px;border:3px solid #19f59a;border-radius:20px;box-shadow:0 0 0 9999px rgba(0,0,0,.38),0 0 30px #19f59a55}
+      .rdScanLine{position:absolute;left:0;right:0;top:3px;height:3px;background:#19f59a;box-shadow:0 0 14px #19f59a;animation:rdScanMove 1.15s linear infinite}
       @keyframes rdScanMove{0%{top:4%}50%{top:94%}100%{top:4%}}
       .rdScanHint{position:absolute;z-index:4;left:18px;right:18px;bottom:105px;text-align:center;background:#000c;border-radius:15px;padding:12px 10px;font-size:13px;font-weight:800}
       .rdScanStop{position:absolute;z-index:4;bottom:25px;left:50%;transform:translateX(-50%);border:0;border-radius:28px;padding:14px 28px;background:#ef4444;color:#fff;font-size:14px;font-weight:900}
@@ -1893,43 +1919,81 @@
     return '';
   }
 
+  function rdPreprocessCanvas(ctx,w,h){
+    // Fast grayscale + contrast + threshold. Helps printed dark digits stand out.
+    try{
+      const img=ctx.getImageData(0,0,w,h);
+      const d=img.data;
+
+      // Estimate brightness from a sparse sample, then use an adaptive threshold.
+      let sum=0, samples=0;
+      const pixelCount=w*h;
+      const step=Math.max(1,Math.floor(pixelCount/5000));
+      for(let p=0;p<pixelCount;p+=step){
+        const i=p*4;
+        sum+=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114);
+        samples++;
+      }
+      const avg=samples ? sum/samples : 150;
+      const threshold=Math.max(95,Math.min(205,avg*0.92));
+
+      for(let i=0;i<d.length;i+=4){
+        const gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+        const v=gray>threshold ? 255 : 0;
+        d[i]=d[i+1]=d[i+2]=v;
+      }
+      ctx.putImageData(img,0,0);
+    }catch(_){}
+  }
+
   async function rdOCRFrame(){
-    if(!rdScanRunning || rdOcrBusy) return;
+    if(!rdScanRunning || rdOcrBusy || rdCaptured) return;
 
     const video=document.getElementById('rdScanVideo');
     const canvas=document.getElementById('rdScanCanvas');
-    if(!video || !canvas || !video.videoWidth) return;
+    if(!video || !canvas || !video.videoWidth || video.readyState<2) return;
 
     rdOcrBusy=true;
 
     try{
       const vw=video.videoWidth, vh=video.videoHeight;
-      const cw=Math.floor(vw*.92), ch=Math.floor(vh*.30);
-      const sx=Math.floor((vw-cw)/2), sy=Math.floor((vh-ch)/2);
-      const scale=2;
 
-      canvas.width=cw*scale;
-      canvas.height=ch*scale;
+      // Tight center ROI = fewer pixels for OCR = faster recognition.
+      const cw=Math.max(320,Math.floor(vw*.88));
+      const ch=Math.max(90,Math.floor(vh*.18));
+      const sx=Math.max(0,Math.floor((vw-cw)/2));
+      const sy=Math.max(0,Math.floor((vh-ch)/2));
+
+      // Keep OCR bitmap reasonably small for speed while retaining digit detail.
+      const targetW=Math.min(1280,Math.max(760,cw));
+      const scale=targetW/cw;
+      const outW=Math.floor(cw*scale);
+      const outH=Math.floor(ch*scale);
+
+      if(canvas.width!==outW) canvas.width=outW;
+      if(canvas.height!==outH) canvas.height=outH;
 
       const ctx=canvas.getContext('2d',{willReadFrequently:true});
       ctx.imageSmoothingEnabled=true;
-      ctx.drawImage(video,sx,sy,cw,ch,0,0,cw*scale,ch*scale);
+      ctx.clearRect(0,0,outW,outH);
+      ctx.drawImage(video,sx,sy,cw,ch,0,0,outW,outH);
 
-      rdScanStatus('🔎 Reading RD account number…');
+      rdPreprocessCanvas(ctx,outW,outH);
+      rdScanStatus('⚡ Reading RD account number…');
 
-      const result=await Tesseract.recognize(canvas,'eng',{logger:()=>{}, tessedit_char_whitelist:'0123456789', psm:7});
-      if(!rdScanRunning) return;
+      const worker=await rdGetWorker();
+      if(!rdScanRunning || rdCaptured) return;
+
+      const result=await worker.recognize(canvas);
+      if(!rdScanRunning || rdCaptured) return;
 
       const number=rdExtractNumber(result?.data?.text||'');
 
       if(number){
-        // SINGLE-PASS: the first valid RD number is accepted immediately.
-        if(rdCaptured) return;
         rdCaptured=true;
         rdLastNumber=number;
 
         const input=document.getElementById('cardNumberInput');
-
         if(input){
           input.value=number;
           input.dispatchEvent(new Event('input',{bubbles:true}));
@@ -1938,27 +2002,31 @@
 
         rdScanStatus(`✅ RD account captured: ${number}`);
 
+        if(navigator.vibrate){
+          try{ navigator.vibrate(35); }catch(_){}
+        }
+
         if(typeof showToast==='function'){
           showToast('✅ RD account number captured','success');
         }
 
-        // Close smoothly and return to Add Card immediately.
+        // Return quickly; no verification/confirmation pass.
         setTimeout(()=>{
           stopRDScanner();
           const target=document.getElementById('cardNumberInput');
           if(target){
             target.scrollIntoView({behavior:'smooth',block:'center'});
-            target.focus({preventScroll:true});
+            try{ target.focus({preventScroll:true}); }catch(_){ target.focus(); }
           }
-        },300);
+        },160);
 
         return;
-      }else{
-        rdScanStatus('🔎 Looking for RD account number starting with 6058…');
       }
+
+      rdScanStatus('🎯 Keep the 6058… RD number inside the green box');
     }catch(err){
       console.error('RD OCR error:',err);
-      rdScanStatus('⚠️ Scan retrying… keep RD number clear');
+      if(rdScanRunning) rdScanStatus('⚡ Retrying… keep the number clear');
     }finally{
       rdOcrBusy=false;
     }
@@ -1966,8 +2034,36 @@
 
   function rdScanLoop(){
     if(!rdScanRunning) return;
+
     rdOCRFrame();
-    rdScanTimer=setTimeout(rdScanLoop,650);
+
+    // Short interval; rdOcrBusy prevents overlapping OCR jobs.
+    rdScanTimer=setTimeout(rdScanLoop,180);
+  }
+
+  async function rdOptimizeCamera(track){
+    if(!track) return;
+    try{
+      const caps=track.getCapabilities ? track.getCapabilities() : {};
+      const advanced=[];
+
+      if(caps.focusMode?.includes?.('continuous')){
+        advanced.push({focusMode:'continuous'});
+      }
+
+      // Mild zoom can make account digits larger without requiring the user
+      // to move the phone too close. Only apply when the device supports it.
+      if(caps.zoom){
+        const min=Number(caps.zoom.min ?? 1);
+        const max=Number(caps.zoom.max ?? min);
+        const zoom=Math.min(max,Math.max(min,1.15));
+        if(Number.isFinite(zoom)) advanced.push({zoom});
+      }
+
+      if(advanced.length){
+        await track.applyConstraints({advanced});
+      }
+    }catch(_){}
   }
 
   async function startRDScanner(){
@@ -1988,26 +2084,34 @@
       const video=document.getElementById('rdScanVideo');
 
       modal.classList.add('active');
-      rdScanStatus('📷 Starting rear camera…');
+      rdScanStatus('⚡ Starting fast scanner…');
+
+      // Warm the OCR worker while camera permission/startup is happening.
+      const workerWarmup=rdGetWorker().catch(()=>null);
 
       rdScanStream=await navigator.mediaDevices.getUserMedia({
         audio:false,
         video:{
           facingMode:{ideal:'environment'},
           width:{ideal:1920},
-          height:{ideal:1080}
+          height:{ideal:1080},
+          frameRate:{ideal:30,max:60}
         }
       });
 
       video.srcObject=rdScanStream;
       await video.play();
 
+      const track=rdScanStream.getVideoTracks()[0];
+      await rdOptimizeCamera(track);
+      await workerWarmup;
+
       rdScanRunning=true;
       rdOcrBusy=false;
       rdLastNumber='';
       rdCaptured=false;
 
-      rdScanStatus('🔎 Looking for RD account number starting with 6058…');
+      rdScanStatus('🎯 Keep the 6058… RD number inside the green box');
       rdScanLoop();
     }catch(err){
       console.error('Camera error:',err);
@@ -2042,6 +2146,8 @@
     rdOcrBusy=false;
     rdLastNumber='';
     rdCaptured=false;
+
+    // Keep rdWorker alive so the next scan opens much faster.
   }
 
   // Compatibility: existing calls now use our scanner, never Google Lens.
@@ -3010,3 +3116,4 @@
 </script>
 </body>
 </html>
+```
