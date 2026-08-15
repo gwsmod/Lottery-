@@ -1816,112 +1816,62 @@
   const logoutYesBtn = $('logoutYesBtn');
   const logoutNoBtn = $('logoutNoBtn');
 
-  // ─── FULLY FIXED ACCOUNT NUMBER CAMERA SCANNER ────────────────────────────
-  let scanStream = null;
-  let scanRunning = false;
-  let scanBusy = false;
-  let scanTimer = null;
-  let ocrWorker = null;
-  let ocrReady = false;
-  let ocrMode = 0;
+  // ─── RD ACCOUNT CAMERA SCANNER (NO GOOGLE LENS) ────────────────────────────
+  let rdScanStream=null, rdScanRunning=false, rdOcrBusy=false, rdScanTimer=null;
+  let rdLastNumber='', rdSameCount=0;
+  let rdOCRWorker=null;
+  let rdOCRReady=false;
 
-  function ensureScannerUI(){
-    if(document.getElementById('accountScanModal')) return;
+  function rdEnsureScannerUI(){
+    if(document.getElementById('rdScanModal')) return;
 
     const style=document.createElement('style');
-    style.id='accountScanStyles';
+    style.id='rdScanStyles';
     style.textContent=`
-      #accountScanModal{
-        position:fixed;inset:0;z-index:999999;
-        display:none;background:#000;color:#fff;overflow:hidden;
-      }
-      #accountScanModal.active{display:block}
-      #accountScanVideo{
-        position:absolute;inset:0;width:100%;height:100%;
-        object-fit:cover;background:#000;
-      }
-      #accountScanTop{
-        position:absolute;top:0;left:0;right:0;z-index:5;
-        display:flex;align-items:center;justify-content:space-between;
-        padding:16px 18px 45px;
-        background:linear-gradient(#000d,transparent);
-      }
-      #accountScanTitle{font-size:17px;font-weight:900}
-      #accountScanClose{
-        width:44px;height:44px;border:0;border-radius:50%;
-        background:#ffffff25;color:#fff;font-size:28px;line-height:1;
-      }
-      #accountScanBox{
-        position:absolute;z-index:3;
-        left:4%;right:4%;top:50%;
-        transform:translateY(-50%);
-        height:155px;border:3px solid #19f59a;
-        border-radius:18px;
-        box-shadow:0 0 0 9999px rgba(0,0,0,.38),
-                   0 0 28px rgba(25,245,154,.45);
-        pointer-events:none;
-      }
-      #accountScanLine{
-        position:absolute;left:0;right:0;top:2px;height:3px;
-        background:#19f59a;box-shadow:0 0 14px #19f59a;
-        animation:accountScanMove 1.15s linear infinite;
-      }
-      @keyframes accountScanMove{
-        0%{top:3%}50%{top:97%}100%{top:3%}
-      }
-      #accountScanHint{
-        position:absolute;z-index:6;left:15px;right:15px;bottom:86px;
-        padding:12px 10px;border-radius:14px;
-        background:rgba(0,0,0,.78);
-        text-align:center;font:800 13px system-ui,sans-serif;
-      }
-      #accountScanStop{
-        position:absolute;z-index:6;left:50%;bottom:22px;
-        transform:translateX(-50%);
-        border:0;border-radius:26px;padding:13px 27px;
-        background:#ef4444;color:#fff;font-size:14px;font-weight:900;
-      }
+      #rdScanModal{position:fixed;inset:0;z-index:999999;display:none;background:#000;color:#fff;flex-direction:column}
+      #rdScanModal.active{display:flex}
+      #rdScanVideo{width:100%;height:100%;object-fit:cover}
+      .rdScanTop{position:absolute;top:0;left:0;right:0;z-index:3;padding:18px 18px 45px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(#000c,transparent)}
+      .rdScanTitle{font-size:17px;font-weight:900}
+      .rdScanClose{width:44px;height:44px;border:0;border-radius:50%;background:#ffffff22;color:#fff;font-size:27px}
+      .rdScanBox{position:absolute;z-index:2;left:5%;right:5%;top:50%;transform:translateY(-50%);height:135px;border:3px solid #19f59a;border-radius:20px;box-shadow:0 0 0 9999px rgba(0,0,0,.38),0 0 30px #19f59a55}
+      .rdScanLine{position:absolute;left:0;right:0;top:3px;height:3px;background:#19f59a;box-shadow:0 0 14px #19f59a;animation:rdScanMove 1.7s linear infinite}
+      @keyframes rdScanMove{0%{top:4%}50%{top:94%}100%{top:4%}}
+      .rdScanHint{position:absolute;z-index:4;left:18px;right:18px;bottom:105px;text-align:center;background:#000c;border-radius:15px;padding:12px 10px;font-size:13px;font-weight:800}
+      .rdScanStop{position:absolute;z-index:4;bottom:25px;left:50%;transform:translateX(-50%);border:0;border-radius:28px;padding:14px 28px;background:#ef4444;color:#fff;font-size:14px;font-weight:900}
     `;
     document.head.appendChild(style);
 
     const modal=document.createElement('div');
-    modal.id='accountScanModal';
+    modal.id='rdScanModal';
     modal.innerHTML=`
-      <div id="accountScanTop">
-        <div id="accountScanTitle">📷 Account Number Scanner</div>
-        <button type="button" id="accountScanClose">×</button>
+      <div class="rdScanTop">
+        <div class="rdScanTitle">🏦 RD Account Scanner</div>
+        <button type="button" class="rdScanClose" id="rdScanClose">×</button>
       </div>
-      <video id="accountScanVideo" autoplay muted playsinline></video>
-      <div id="accountScanBox">
-        <div id="accountScanLine"></div>
-      </div>
-      <div id="accountScanHint">
-        ⚡ Keep the account number inside the green box
-      </div>
-      <button type="button" id="accountScanStop">
-        ✕ Stop Scanner
-      </button>
-      <canvas id="accountScanCanvas" hidden></canvas>
+      <video id="rdScanVideo" autoplay muted playsinline></video>
+      <div class="rdScanBox"><div class="rdScanLine"></div></div>
+      <div class="rdScanHint" id="rdScanHint">🔎 Looking only for RD account number starting with 6058…</div>
+      <button type="button" class="rdScanStop" id="rdScanStop">✕ Stop Scanner</button>
+      <canvas id="rdScanCanvas" hidden></canvas>
     `;
     document.body.appendChild(modal);
-
-    document.getElementById('accountScanClose').onclick=stopAccountScanner;
-    document.getElementById('accountScanStop').onclick=stopAccountScanner;
+    document.getElementById('rdScanClose').onclick=stopRDScanner;
+    document.getElementById('rdScanStop').onclick=stopRDScanner;
   }
 
-  function scannerStatus(text){
-    const el=document.getElementById('accountScanHint');
+  function rdScanStatus(text){
+    const el=document.getElementById('rdScanHint');
     if(el) el.textContent=text;
   }
 
-  /*
-   * Extract a useful numeric sequence.
-   * No RD-specific prefix and no second verification.
-   */
-  function extractAccountNumber(text){
+  function rdExtractNumber(text){
     if(!text) return '';
 
-    const normalized=String(text)
+    // Fixed debit account number: ALWAYS ignore.
+    const blocked='60587267492';
+
+    const clean=String(text)
       .replace(/[Oo]/g,'0')
       .replace(/[IiLl]/g,'1')
       .replace(/[Zz]/g,'2')
@@ -1929,461 +1879,221 @@
       .replace(/[Gg]/g,'6')
       .replace(/[Bb]/g,'8');
 
-    // Prefer a continuous 8–20 digit sequence.
-    const matches=normalized.match(/\d{8,20}/g) || [];
+    // Fast path: OCR normally returns the RD number as a continuous 11-digit value.
+    const direct=clean.match(/6058\d{7}/);
+    if(direct && direct[0]!==blocked) return direct[0];
 
-    if(matches.length){
-      // Prefer the longest candidate; if equal, keep first.
-      matches.sort((a,b)=>b.length-a.length);
-      return matches[0];
-    }
-
-    // Handle OCR that inserts spaces/newlines between digits.
-    const lines=normalized.split(/\n+/);
-
-    for(const line of lines){
-      const n=line.replace(/\D/g,'');
-      if(n.length>=8 && n.length<=20){
-        return n;
-      }
+    // Handle spaces/newlines between digits.
+    const spaced=clean.match(/6\s*0\s*5\s*8(?:\s*\d){7}/);
+    if(spaced){
+      const n=spaced[0].replace(/\D/g,'');
+      if(/^6058\d{7}$/.test(n) && n!==blocked) return n;
     }
 
     return '';
   }
 
-  async function prepareAccountOCR(){
-    if(ocrReady && ocrWorker) return true;
+  async function rdOCRFrame(){
+    if(!rdScanRunning || rdOcrBusy || !rdOCRReady || !rdOCRWorker) return;
 
-    if(!window.Tesseract){
-      console.error('Tesseract.js is unavailable');
-      return false;
-    }
+    const video=document.getElementById('rdScanVideo');
+    const canvas=document.getElementById('rdScanCanvas');
+    if(!video || !canvas || !video.videoWidth) return;
 
-    try{
-      scannerStatus('⚡ Preparing scanner…');
-
-      ocrWorker=await Tesseract.createWorker('eng');
-
-      await ocrWorker.setParameters({
-        tessedit_char_whitelist:'0123456789',
-        preserve_interword_spaces:'1',
-        user_defined_dpi:'200'
-      });
-
-      ocrReady=true;
-      return true;
-
-    }catch(error){
-      console.error('OCR initialization failed:',error);
-      ocrWorker=null;
-      ocrReady=false;
-      return false;
-    }
-  }
-
-  function drawScannerFrame(video,canvas,enhanced){
-    const vw=video.videoWidth;
-    const vh=video.videoHeight;
-
-    /*
-     * Wider crop so the complete account-number row is inside OCR.
-     */
-    const cropW=Math.floor(vw*.94);
-    const cropH=Math.floor(vh*.30);
-    const cropX=Math.floor((vw-cropW)/2);
-    const cropY=Math.floor((vh-cropH)/2);
-
-    canvas.width=1400;
-    canvas.height=450;
-
-    const ctx=canvas.getContext('2d',{willReadFrequently:true});
-    ctx.filter='none';
-    ctx.drawImage(
-      video,
-      cropX,cropY,cropW,cropH,
-      0,0,1400,450
-    );
-
-    if(!enhanced) return;
-
-    /*
-     * Lightweight browser preprocessing.
-     * This avoids loading OpenCV and keeps the scanner responsive.
-     */
-    const image=ctx.getImageData(0,0,canvas.width,canvas.height);
-    const p=image.data;
-
-    for(let i=0;i<p.length;i+=4){
-      const y=
-        (0.299*p[i])+
-        (0.587*p[i+1])+
-        (0.114*p[i+2]);
-
-      const v=Math.max(
-        0,
-        Math.min(
-          255,
-          ((y-105)*1.75)+105
-        )
-      );
-
-      p[i]=v;
-      p[i+1]=v;
-      p[i+2]=v;
-    }
-
-    ctx.putImageData(image,0,0);
-  }
-
-  async function scanAccountFrame(){
-    if(
-      !scanRunning ||
-      scanBusy ||
-      !ocrReady ||
-      !ocrWorker
-    ) return;
-
-    const video=document.getElementById('accountScanVideo');
-    const canvas=document.getElementById('accountScanCanvas');
-
-    if(
-      !video ||
-      !canvas ||
-      video.readyState<2 ||
-      !video.videoWidth
-    ) return;
-
-    scanBusy=true;
+    rdOcrBusy=true;
 
     try{
-      /*
-       * Alternate raw/enhanced image.
-       * This gives OCR two useful representations without
-       * requiring two OCR calls for every frame.
-       */
-      const enhanced=(ocrMode%2)!==0;
+      const vw=video.videoWidth, vh=video.videoHeight;
 
-      drawScannerFrame(
-        video,
-        canvas,
-        enhanced
-      );
+      // Smaller ROI = dramatically less OCR work.
+      // The green box is the only area that matters.
+      const cw=Math.floor(vw*.88);
+      const ch=Math.floor(vh*.20);
+      const sx=Math.floor((vw-cw)/2);
+      const sy=Math.floor((vh-ch)/2);
 
-      await ocrWorker.setParameters({
-        tessedit_pageseg_mode:enhanced?'7':'6',
-        tessedit_char_whitelist:'0123456789',
-        preserve_interword_spaces:'1'
-      });
+      canvas.width=960;
+      canvas.height=220;
 
-      const result=await ocrWorker.recognize(canvas);
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});
+      ctx.imageSmoothingEnabled=true;
+      ctx.drawImage(video,sx,sy,cw,ch,0,0,960,220);
 
-      if(!scanRunning) return;
+      const result=await rdOCRWorker.recognize(canvas);
+      if(!rdScanRunning) return;
 
       const text=result?.data?.text || '';
-      console.log('ACCOUNT OCR:',text);
+      const number=rdExtractNumber(text);
 
-      const number=extractAccountNumber(text);
-
-      /*
-       * FIRST VALID RESULT = IMMEDIATE CAPTURE.
-       * No second scan / no confirmation.
-       */
       if(number){
+        // 6058 + 7 digits and not the fixed debit account.
         const input=document.getElementById('cardNumberInput');
 
         if(input){
           input.value=number;
-
-          input.dispatchEvent(
-            new Event('input',{bubbles:true})
-          );
-
-          input.dispatchEvent(
-            new Event('change',{bubbles:true})
-          );
+          input.dispatchEvent(new Event('input',{bubbles:true}));
+          input.dispatchEvent(new Event('change',{bubbles:true}));
         }
 
-        if(typeof showToast==='function'){
-          showToast(
-            '✅ Account number captured',
-            'success'
-          );
-        }
+        rdScanStatus('✅ RD account captured!');
 
-        scannerStatus(
-          '✅ Captured: '+number
-        );
+        if(typeof showToast==='function')
+          showToast('✅ RD account number captured','success');
 
-        /*
-         * Stop camera immediately.
-         */
-        stopAccountScanner();
+        // Immediately close camera and return to Account Number field.
+        stopRDScanner();
 
-        /*
-         * Re-apply value after closing the scanner.
-         * This protects against UI re-rendering.
-         */
         setTimeout(()=>{
-          const target=
-            document.getElementById('cardNumberInput');
-
+          const target=document.getElementById('cardNumberInput');
           if(target){
             target.value=number;
-
-            target.dispatchEvent(
-              new Event('input',{bubbles:true})
-            );
-
-            target.dispatchEvent(
-              new Event('change',{bubbles:true})
-            );
-
-            target.focus();
-
-            target.scrollIntoView({
-              behavior:'smooth',
-              block:'center'
-            });
+            target.dispatchEvent(new Event('input',{bubbles:true}));
+            target.dispatchEvent(new Event('change',{bubbles:true}));
+            target.scrollIntoView({behavior:'instant',block:'center'});
           }
         },50);
 
         return;
       }
 
-      ocrMode++;
+      rdScanStatus('⚡ Fast scan: looking for RD 6058…');
 
-      scannerStatus(
-        '🔎 Scanning account number…'
-      );
-
-    }catch(error){
-      console.error(
-        'Account OCR frame error:',
-        error
-      );
-
-      scannerStatus(
-        '🔎 Keep the number clear inside the box…'
-      );
-
+    }catch(err){
+      console.error('Fast RD OCR error:',err);
     }finally{
-      scanBusy=false;
+      rdOcrBusy=false;
     }
   }
 
-  function accountScanLoop(){
-    if(!scanRunning) return;
+  function rdScanLoop(){
+    if(!rdScanRunning) return;
 
-    scanAccountFrame();
+    rdOCRFrame();
 
-    /*
-     * OCR itself is serialized by scanBusy.
-     * The next frame starts immediately after a short delay.
-     */
-    scanTimer=setTimeout(
-      accountScanLoop,
-      180
-    );
+    // Try a new frame quickly; OCR itself is serialized by rdOcrBusy.
+    rdScanTimer=setTimeout(rdScanLoop,250);
   }
 
-  async function startAccountScanner(){
-    ensureScannerUI();
+  async function prepareRDOCR(){
+    if(rdOCRReady && rdOCRWorker) return true;
 
-    if(scanRunning) return;
+    try{
+      rdScanStatus('⚡ Loading fast OCR…');
 
-    if(
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getUserMedia
-    ){
-      alert(
-        'Camera requires HTTPS and a supported browser.'
-      );
+      rdOCRWorker=await Tesseract.createWorker('eng',1,{
+        logger:()=>{}
+      });
+
+      await rdOCRWorker.setParameters({
+        tessedit_pageseg_mode:'7',
+        tessedit_char_whitelist:'0123456789'
+      });
+
+      rdOCRReady=true;
+      return true;
+
+    }catch(err){
+      console.error('OCR init error:',err);
+      rdOCRWorker=null;
+      rdOCRReady=false;
+      return false;
+    }
+  }
+
+  async function startRDScanner(){
+    rdEnsureScannerUI();
+
+    if(!window.Tesseract){
+      alert('OCR library could not load. Check internet connection and reload the page.');
+      return;
+    }
+
+    if(!navigator.mediaDevices?.getUserMedia){
+      alert('Camera is not supported. Use Chrome/Brave on HTTPS.');
       return;
     }
 
     try{
-      const modal=
-        document.getElementById('accountScanModal');
-
-      const video=
-        document.getElementById('accountScanVideo');
+      const modal=document.getElementById('rdScanModal');
+      const video=document.getElementById('rdScanVideo');
 
       modal.classList.add('active');
+      rdScanStatus('📷 Starting rear camera…');
 
-      scannerStatus(
-        '📷 Starting rear camera…'
-      );
-
-      scanStream=
-        await navigator.mediaDevices.getUserMedia({
-          audio:false,
-          video:{
-            facingMode:{
-              ideal:'environment'
-            },
-            width:{
-              ideal:1920
-            },
-            height:{
-              ideal:1080
-            },
-            frameRate:{
-              ideal:30,
-              max:30
-            }
-          }
-        });
-
-      video.srcObject=scanStream;
-
-      await new Promise(resolve=>{
-        if(video.readyState>=2){
-          resolve();
-        }else{
-          video.onloadedmetadata=resolve;
+      rdScanStream=await navigator.mediaDevices.getUserMedia({
+        audio:false,
+        video:{
+          facingMode:{ideal:'environment'},
+          width:{ideal:1280},
+          height:{ideal:720},
+          frameRate:{ideal:30,max:30}
         }
       });
 
+      video.srcObject=rdScanStream;
       await video.play();
 
-      scanRunning=true;
-      scanBusy=false;
-      ocrMode=0;
+      rdScanRunning=true;
+      rdOcrBusy=false;
+      rdLastNumber='';
+      rdSameCount=0;
 
-      const ready=
-        await prepareAccountOCR();
+      // Start OCR worker once; subsequent scans reuse it.
+      const ready=await prepareRDOCR();
 
       if(!ready){
-        stopAccountScanner();
-
-        alert(
-          'OCR could not load. Check internet connection and reload the page.'
-        );
-
+        stopRDScanner();
+        alert('Fast OCR could not start. Please reload the page.');
         return;
       }
 
-      scannerStatus(
-        '⚡ Ready — place the number inside the green box'
-      );
+      rdScanStatus('⚡ SUPER FAST: looking for RD 6058…');
+      rdScanLoop();
 
-      accountScanLoop();
+    }catch(err){
+      console.error('Camera error:',err);
+      document.getElementById('rdScanModal')?.classList.remove('active');
 
-    }catch(error){
-      console.error(
-        'Camera start error:',
-        error
-      );
-
-      stopAccountScanner();
-
-      if(error.name==='NotAllowedError'){
-        alert(
-          'Camera permission denied. Allow camera permission for this website.'
-        );
-      }else if(error.name==='NotFoundError'){
-        alert(
-          'No camera was found on this device.'
-        );
-      }else{
-        alert(
-          'Camera error: '+
-          (error.message||error.name)
-        );
-      }
+      if(err.name==='NotAllowedError')
+        alert('Camera permission denied. Allow camera permission for this site.');
+      else
+        alert('Camera error: '+err.message);
     }
   }
 
-  function stopAccountScanner(){
-    scanRunning=false;
+  function stopRDScanner(){
+    rdScanRunning=false;
 
-    if(scanTimer){
-      clearTimeout(scanTimer);
-      scanTimer=null;
+    if(rdScanTimer){
+      clearTimeout(rdScanTimer);
+      rdScanTimer=null;
     }
 
-    if(scanStream){
-      scanStream
-        .getTracks()
-        .forEach(track=>{
-          try{
-            track.stop();
-          }catch(_){}
-        });
-
-      scanStream=null;
+    if(rdScanStream){
+      rdScanStream.getTracks().forEach(t=>{try{t.stop()}catch(_){}});
+      rdScanStream=null;
     }
 
-    const video=
-      document.getElementById('accountScanVideo');
-
+    const video=document.getElementById('rdScanVideo');
     if(video){
-      try{
-        video.pause();
-        video.srcObject=null;
-      }catch(_){}
+      try{video.pause();video.srcObject=null}catch(_){}
     }
 
-    const modal=
-      document.getElementById('accountScanModal');
-
-    if(modal){
-      modal.classList.remove('active');
-    }
-
-    scanBusy=false;
+    document.getElementById('rdScanModal')?.classList.remove('active');
+    rdOcrBusy=false;
+    rdLastNumber='';
+    rdSameCount=0;
   }
 
-  /*
-   * Compatibility with the original button.
-   * Google Lens is NOT used.
-   */
+
+  window.addEventListener('beforeunload',()=>{
+    try{ rdOCRWorker?.terminate(); }catch(_){}
+  });
+
+  // Compatibility: existing calls now use our scanner, never Google Lens.
   function openGoogleLensOrCamera(){
-    startAccountScanner();
+    startRDScanner();
   }
-
-  /*
-   * Attach exactly one camera-button handler.
-   */
-  function attachAccountScannerButton(){
-    const button=
-      document.getElementById('cameraBtn');
-
-    if(!button || button.dataset.scannerAttached==='1'){
-      return;
-    }
-
-    button.dataset.scannerAttached='1';
-
-    button.addEventListener(
-      'click',
-      function(event){
-        event.preventDefault();
-        event.stopPropagation();
-        startAccountScanner();
-      },
-      true
-    );
-  }
-
-  if(document.readyState==='loading'){
-    document.addEventListener(
-      'DOMContentLoaded',
-      attachAccountScannerButton,
-      {once:true}
-    );
-  }else{
-    attachAccountScannerButton();
-  }
-
-  window.addEventListener(
-    'beforeunload',
-    ()=>{
-      try{
-        ocrWorker?.terminate();
-      }catch(_){}
-    }
-  );
 
   // ─── TOAST ──────────────────────────────────────────────────────────────────
   function showToast(msg, type='error'){
@@ -2895,9 +2605,12 @@
       </div></div>`);
 
     // ─── CAMERA / GOOGLE LENS BUTTON ──────────────────────────────────────
-    
-    }
-    }
+    const cameraBtn = document.getElementById('cameraBtn');
+    cameraBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      startRDScanner();
+    });
 
     // ─── DELETE CARD ──────────────────────────────────────────────────────
     document.querySelectorAll('.delete-card-btn').forEach(b=>{
@@ -3343,3 +3056,4 @@
 </script>
 </body>
 </html>
+```
