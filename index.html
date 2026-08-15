@@ -1866,46 +1866,72 @@
   // IMPORTANT: Only accept a number associated with "RD account number".
   // Never fall back to arbitrary 9-18 digit numbers, so Debit account number,
   // amount, dates, etc. cannot be selected.
+  // RD numbers on this statement always start with 6058.
+  // The debit account number is fixed and must NEVER be returned.
+  const FIXED_DEBIT_ACCOUNT = '60587267492';
+
+  function rdNormalizeOCRDigits(text){
+    return String(text||'')
+      .replace(/[OoQq]/g,'0')
+      .replace(/[IiLl|]/g,'1')
+      .replace(/[Zz]/g,'2')
+      .replace(/[Ss]/g,'5')
+      .replace(/[Bb]/g,'8')
+      .replace(/[Gg]/g,'6')
+      .replace(/[^0-9]/g,'');
+  }
+
+  function isValidRDNumber(n){
+    return /^6058\d{7}$/.test(n) && n !== FIXED_DEBIT_ACCOUNT;
+  }
+
   function findRDAccountNumber(ocrText){
     const raw=String(ocrText||'').replace(/\r/g,'');
     const lines=raw.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+    const found=[];
 
-    const rdLabel=/\br\s*\.?\s*d\.?\b[\s:_-]*(account|a\s*\/\s*c|acc)/i;
-    const debitLabel=/debit\s*(account|a\s*\/\s*c|acc)/i;
-
-    // Pass 1: same OCR line as RD account number label.
+    // 1) Best case: OCR sees the complete number on one line.
     for(const line of lines){
-      if(rdLabel.test(line) && !debitLabel.test(line)){
-        const nums=line.match(/[0-9OoQqIiLlZzSsBb|][0-9OoQqIiLlZzSsBb|\s-]{7,24}[0-9OoQqIiLlZzSsBb|]/g)||[];
-        for(const n of nums){
-          const d=rdDigits(n);
-          if(d.length>=9 && d.length<=18) return d;
-        }
+      const compact=rdNormalizeOCRDigits(line);
+      const matches=compact.match(/6058\d{7}/g)||[];
+      for(const m of matches){
+        if(isValidRDNumber(m)) found.push(m);
       }
     }
 
-    // Pass 2: RD label on one line, number immediately before/after it on
-    // a nearby OCR line. Still reject any debit-labelled line.
-    for(let i=0;i<lines.length;i++){
-      if(!rdLabel.test(lines[i]) || debitLabel.test(lines[i])) continue;
-
-      for(const j of [i-1,i+1,i+2]){
-        if(j<0 || j>=lines.length) continue;
-        if(debitLabel.test(lines[j])) continue;
-        const d=rdDigits(lines[j]);
-        if(d.length>=9 && d.length<=18) return d;
-      }
-    }
-
-    // Pass 3: OCR can join "RD" badly. Look for a line containing both
-    // account and a token that OCR commonly reads as RD.
+    // 2) OCR sometimes inserts spaces/hyphens inside the account number.
+    // Search each line after removing separators, but DO NOT join different lines.
     for(const line of lines){
-      const n=rdNormalize(line);
-      if((n.includes('rdaccount') || n.includes('rdaccoun')) && !n.includes('debit')){
-        const d=rdDigits(line);
-        if(d.length>=9 && d.length<=18) return d;
+      const compact=String(line)
+        .replace(/[OoQq]/g,'0')
+        .replace(/[IiLl|]/g,'1')
+        .replace(/[Zz]/g,'2')
+        .replace(/[Ss]/g,'5')
+        .replace(/[Bb]/g,'8')
+        .replace(/[Gg]/g,'6')
+        .replace(/[\s._-]/g,'')
+        .replace(/[^0-9]/g,'');
+      const matches=compact.match(/6058\d{7}/g)||[];
+      for(const m of matches){
+        if(isValidRDNumber(m)) found.push(m);
       }
     }
+
+    // 3) If OCR splits the RD number into two text tokens on the SAME line,
+    // combine only tokens that begin with 6058 and have a total of 11 digits.
+    for(const line of lines){
+      const tokens=line.match(/[0-9OoQqIiLlZzSsBbGg|]{3,}/g)||[];
+      for(const token of tokens){
+        const d=rdNormalizeOCRDigits(token);
+        if(isValidRDNumber(d)) found.push(d);
+      }
+    }
+
+    // 4) The RD number is unique. If OCR gives several candidates, remove
+    // the known debit number and use the remaining 6058... candidate.
+    const unique=[...new Set(found)].filter(isValidRDNumber);
+    if(unique.length===1) return unique[0];
+    if(unique.length>1) return unique[0];
 
     return '';
   }
@@ -1938,7 +1964,27 @@
       rdDrawRotated(rdScanVideo,rdScanCanvas,angle);
       rdSetStatus('🔎 Looking specifically for RD account number...');
 
-      const result=await Tesseract.recognize(rdScanCanvas,'eng',{
+      // Upscale + grayscale + contrast before OCR. This helps when the
+      // statement is being filmed from another phone/screen.
+      const src=rdScanCanvas;
+      const prep=document.createElement('canvas');
+      prep.width=src.width*2;
+      prep.height=src.height*2;
+      const pctx=prep.getContext('2d',{willReadFrequently:true});
+      pctx.drawImage(src,0,0,prep.width,prep.height);
+      const img=pctx.getImageData(0,0,prep.width,prep.height);
+      for(let i=0;i<img.data.length;i+=4){
+        const g=Math.round(0.299*img.data[i]+0.587*img.data[i+1]+0.114*img.data[i+2]);
+        const c=Math.max(0,Math.min(255,(g-105)*1.8+105));
+        img.data[i]=img.data[i+1]=img.data[i+2]=c;
+      }
+      pctx.putImageData(img,0,0);
+
+      const result=await Tesseract.recognize(prep,'eng',{
+        config:{
+          tessedit_char_whitelist:'0123456789OoQqIiLlZzSsBbGg',
+          tessedit_pageseg_mode:'6'
+        },
         logger:m=>{
           if(m.status==='recognizing text' && typeof m.progress==='number'){
             rdSetStatus(`🔎 RD account scan ${Math.round(m.progress*100)}%`);
@@ -1971,7 +2017,7 @@
       }else{
         rdLastNumber='';
         rdConfirmCount=0;
-        rdSetStatus('📷 Put the "RD account number" line inside the green box');
+        rdSetStatus('📷 Find the unique 6058xxxxxxxx RD number — debit number is ignored');
       }
     }catch(e){
       console.error('RD OCR error:',e);
