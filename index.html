@@ -1920,39 +1920,36 @@
       if(!rdScanRunning) return;
 
       const number=rdExtractNumber(result?.data?.text||'');
+if(number){
+  const input=document.getElementById('cardNumberInput');
 
-      if(number){
-        if(number===rdLastNumber) rdSameCount++;
-        else { rdLastNumber=number; rdSameCount=1; }
+  if(input){
+    input.value=number;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+  }
 
-        rdScanStatus(`✅ RD number found: ${number} • Confirm ${rdSameCount}/2`);
+  rdScanStatus('✅ RD account captured. Returning back…');
 
-        if(rdSameCount>=2){
-          const input=document.getElementById('cardNumberInput');
+  if(typeof showToast==='function'){
+    showToast('✅ RD account number captured','success');
+  }
 
-          if(input){
-            input.value=number;
-            input.dispatchEvent(new Event('input',{bubbles:true}));
-            input.dispatchEvent(new Event('change',{bubbles:true}));
-          }
+  setTimeout(()=>{
+    stopRDScanner();
 
-          rdScanStatus('✅ RD account captured. Returning back…');
+    const target=document.getElementById('cardNumberInput');
+    if(target){
+      target.scrollIntoView({
+        behavior:'smooth',
+        block:'center'
+      });
+      target.focus();
+    }
+  },450);
 
-          if(typeof showToast==='function')
-            showToast('✅ RD account number captured','success');
-
-          // Close scanner and return to the Add Card screen automatically.
-          setTimeout(()=>{
-            stopRDScanner();
-            const target=document.getElementById('cardNumberInput');
-            if(target){
-              target.scrollIntoView({behavior:'smooth',block:'center'});
-              target.focus();
-            }
-          },450);
-
-          return;
-        }
+  return;
+}
       }else{
         rdLastNumber='';
         rdSameCount=0;
