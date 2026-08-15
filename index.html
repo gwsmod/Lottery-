@@ -1845,7 +1845,7 @@
     modal.id='rdScanModal';
     modal.innerHTML=`
       <div class="rdScanTop">
-        <div class="rdScanTitle">🏦 RD Account Scanner</div>
+        <div class="rdScanTitle">🏦 Account Scanner</div>
         <button type="button" class="rdScanClose" id="rdScanClose">×</button>
       </div>
       <video id="rdScanVideo" autoplay muted playsinline></video>
@@ -1864,12 +1864,18 @@
     if(el) el.textContent=text;
   }
 
-  function rdExtractNumber(text){
+  function rdFindNumber(text){
     if(!text) return '';
 
-    // Fixed debit account number: ALWAYS ignore.
-    const blocked='60587267492';
-
+    /*
+     * GENERIC MODE:
+     * No RD prefix requirement.
+     * No fixed-number requirement.
+     * Capture the first useful account/card-like numeric sequence.
+     *
+     * Prefer 8–20 consecutive digits, which avoids capturing
+     * tiny OCR fragments such as dates or single digits.
+     */
     const clean=String(text)
       .replace(/[Oo]/g,'0')
       .replace(/[IiLl]/g,'1')
@@ -1878,15 +1884,21 @@
       .replace(/[Gg]/g,'6')
       .replace(/[Bb]/g,'8');
 
-    // Fast path: OCR normally returns the RD number as a continuous 11-digit value.
-    const direct=clean.match(/6058\d{7}/);
-    if(direct && direct[0]!==blocked) return direct[0];
+    // First prefer long continuous numeric sequences.
+    const matches=clean.match(/\d{8,20}/g) || [];
 
-    // Handle spaces/newlines between digits.
-    const spaced=clean.match(/6\s*0\s*5\s*8(?:\s*\d){7}/);
-    if(spaced){
-      const n=spaced[0].replace(/\D/g,'');
-      if(/^6058\d{7}$/.test(n) && n!==blocked) return n;
+    if(matches.length){
+      return matches[0];
+    }
+
+    // OCR sometimes inserts spaces/newlines between digits.
+    const spaced=clean.match(/(?:\d[\s-]*){8,20}/g) || [];
+
+    for(const item of spaced){
+      const n=item.replace(/\D/g,'');
+      if(n.length>=8 && n.length<=20){
+        return n;
+      }
     }
 
     return '';
@@ -1937,7 +1949,7 @@
         rdScanStatus('✅ RD account captured!');
 
         if(typeof showToast==='function')
-          showToast('✅ RD account number captured','success');
+          showToast('✅ Account number captured','success');
 
         // Immediately close camera and return to Account Number field.
         stopRDScanner();
@@ -1955,7 +1967,7 @@
         return;
       }
 
-      rdScanStatus('⚡ Fast scan: looking for RD 6058…');
+      rdScanStatus('⚡ Scanning account number…');
 
     }catch(err){
       console.error('Fast RD OCR error:',err);
@@ -1977,7 +1989,7 @@
     if(rdOCRReady && rdOCRWorker) return true;
 
     try{
-      rdScanStatus('⚡ Loading fast OCR…');
+      rdScanStatus('⚡ Scanning account number…');
 
       rdOCRWorker=await Tesseract.createWorker('eng',1,{
         logger:()=>{}
@@ -2044,7 +2056,7 @@
         return;
       }
 
-      rdScanStatus('⚡ SUPER FAST: looking for RD 6058…');
+      rdScanStatus('⚡ Scanning account number…');
       rdScanLoop();
 
     }catch(err){
