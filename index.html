@@ -1819,6 +1819,8 @@
   // ─── RD ACCOUNT CAMERA SCANNER (NO GOOGLE LENS) ────────────────────────────
   let rdScanStream=null, rdScanRunning=false, rdOcrBusy=false, rdScanTimer=null;
   let rdLastNumber='', rdSameCount=0;
+  let rdOCRWorker=null;
+  let rdOCRReady=false;
 
   function rdEnsureScannerUI(){
     if(document.getElementById('rdScanModal')) return;
@@ -1866,26 +1868,25 @@
   function rdExtractNumber(text){
     if(!text) return '';
 
+    // Fixed debit account number: ALWAYS ignore.
     const blocked='60587267492';
 
-    // OCR may confuse a few characters with digits.
-    const normalized=String(text)
-      .replace(/[Oo]/g,'0').replace(/[IiLl]/g,'1').replace(/[Zz]/g,'2')
-      .replace(/[Ss]/g,'5').replace(/[Gg]/g,'6').replace(/[Bb]/g,'8')
-      .replace(/[^\d]/g,'');
+    const clean=String(text)
+      .replace(/[Oo]/g,'0')
+      .replace(/[IiLl]/g,'1')
+      .replace(/[Zz]/g,'2')
+      .replace(/[Ss]/g,'5')
+      .replace(/[Gg]/g,'6')
+      .replace(/[Bb]/g,'8');
 
-    for(let i=0;i<=normalized.length-11;i++){
-      const part=normalized.slice(i,i+11);
-      if(/^6058\d{7}$/.test(part) && part!==blocked) return part;
-    }
+    // Fast path: OCR normally returns the RD number as a continuous 11-digit value.
+    const direct=clean.match(/6058\d{7}/);
+    if(direct && direct[0]!==blocked) return direct[0];
 
-    const spaced=String(text)
-      .replace(/[Oo]/g,'0').replace(/[IiLl]/g,'1').replace(/[Zz]/g,'2')
-      .replace(/[Ss]/g,'5').replace(/[Gg]/g,'6').replace(/[Bb]/g,'8');
-
-    const m=spaced.match(/6\s*0\s*5\s*8(?:\s*\d){7}/);
-    if(m){
-      const n=m[0].replace(/\D/g,'');
+    // Handle spaces/newlines between digits.
+    const spaced=clean.match(/6\s*0\s*5\s*8(?:\s*\d){7}/);
+    if(spaced){
+      const n=spaced[0].replace(/\D/g,'');
       if(/^6058\d{7}$/.test(n) && n!==blocked) return n;
     }
 
@@ -1893,7 +1894,7 @@
   }
 
   async function rdOCRFrame(){
-    if(!rdScanRunning || rdOcrBusy) return;
+    if(!rdScanRunning || rdOcrBusy || !rdOCRReady || !rdOCRWorker) return;
 
     const video=document.getElementById('rdScanVideo');
     const canvas=document.getElementById('rdScanCanvas');
@@ -1903,64 +1904,62 @@
 
     try{
       const vw=video.videoWidth, vh=video.videoHeight;
-      const cw=Math.floor(vw*.92), ch=Math.floor(vh*.30);
-      const sx=Math.floor((vw-cw)/2), sy=Math.floor((vh-ch)/2);
-      const scale=2;
 
-      canvas.width=cw*scale;
-      canvas.height=ch*scale;
+      // Smaller ROI = dramatically less OCR work.
+      // The green box is the only area that matters.
+      const cw=Math.floor(vw*.88);
+      const ch=Math.floor(vh*.20);
+      const sx=Math.floor((vw-cw)/2);
+      const sy=Math.floor((vh-ch)/2);
+
+      canvas.width=960;
+      canvas.height=220;
 
       const ctx=canvas.getContext('2d',{willReadFrequently:true});
       ctx.imageSmoothingEnabled=true;
-      ctx.drawImage(video,sx,sy,cw,ch,0,0,cw*scale,ch*scale);
+      ctx.drawImage(video,sx,sy,cw,ch,0,0,960,220);
 
-      rdScanStatus('🔎 Reading RD account number…');
-
-      const result=await Tesseract.recognize(canvas,'eng',{logger:()=>{}});
+      const result=await rdOCRWorker.recognize(canvas);
       if(!rdScanRunning) return;
 
-      const number=rdExtractNumber(result?.data?.text||'');
+      const text=result?.data?.text || '';
+      const number=rdExtractNumber(text);
 
       if(number){
-        if(number===rdLastNumber) rdSameCount++;
-        else { rdLastNumber=number; rdSameCount=1; }
+        // 6058 + 7 digits and not the fixed debit account.
+        const input=document.getElementById('cardNumberInput');
 
-        rdScanStatus(`✅ RD number found: ${number} • Confirm ${rdSameCount}/2`);
-
-        if(rdSameCount>=2){
-          const input=document.getElementById('cardNumberInput');
-
-          if(input){
-            input.value=number;
-            input.dispatchEvent(new Event('input',{bubbles:true}));
-            input.dispatchEvent(new Event('change',{bubbles:true}));
-          }
-
-          rdScanStatus('✅ RD account captured. Returning back…');
-
-          if(typeof showToast==='function')
-            showToast('✅ RD account number captured','success');
-
-          // Close scanner and return to the Add Card screen automatically.
-          setTimeout(()=>{
-            stopRDScanner();
-            const target=document.getElementById('cardNumberInput');
-            if(target){
-              target.scrollIntoView({behavior:'smooth',block:'center'});
-              target.focus();
-            }
-          },450);
-
-          return;
+        if(input){
+          input.value=number;
+          input.dispatchEvent(new Event('input',{bubbles:true}));
+          input.dispatchEvent(new Event('change',{bubbles:true}));
         }
-      }else{
-        rdLastNumber='';
-        rdSameCount=0;
-        rdScanStatus('🔎 Looking only for RD account number starting with 6058…');
+
+        rdScanStatus('✅ RD account captured!');
+
+        if(typeof showToast==='function')
+          showToast('✅ RD account number captured','success');
+
+        // Immediately close camera and return to Account Number field.
+        stopRDScanner();
+
+        setTimeout(()=>{
+          const target=document.getElementById('cardNumberInput');
+          if(target){
+            target.value=number;
+            target.dispatchEvent(new Event('input',{bubbles:true}));
+            target.dispatchEvent(new Event('change',{bubbles:true}));
+            target.scrollIntoView({behavior:'instant',block:'center'});
+          }
+        },50);
+
+        return;
       }
+
+      rdScanStatus('⚡ Fast scan: looking for RD 6058…');
+
     }catch(err){
-      console.error('RD OCR error:',err);
-      rdScanStatus('⚠️ Scan retrying… keep RD number clear');
+      console.error('Fast RD OCR error:',err);
     }finally{
       rdOcrBusy=false;
     }
@@ -1968,8 +1967,37 @@
 
   function rdScanLoop(){
     if(!rdScanRunning) return;
+
     rdOCRFrame();
-    rdScanTimer=setTimeout(rdScanLoop,900);
+
+    // Try a new frame quickly; OCR itself is serialized by rdOcrBusy.
+    rdScanTimer=setTimeout(rdScanLoop,250);
+  }
+
+  async function prepareRDOCR(){
+    if(rdOCRReady && rdOCRWorker) return true;
+
+    try{
+      rdScanStatus('⚡ Loading fast OCR…');
+
+      rdOCRWorker=await Tesseract.createWorker('eng',1,{
+        logger:()=>{}
+      });
+
+      await rdOCRWorker.setParameters({
+        tessedit_pageseg_mode:'7',
+        tessedit_char_whitelist:'0123456789'
+      });
+
+      rdOCRReady=true;
+      return true;
+
+    }catch(err){
+      console.error('OCR init error:',err);
+      rdOCRWorker=null;
+      rdOCRReady=false;
+      return false;
+    }
   }
 
   async function startRDScanner(){
@@ -1996,8 +2024,9 @@
         audio:false,
         video:{
           facingMode:{ideal:'environment'},
-          width:{ideal:1920},
-          height:{ideal:1080}
+          width:{ideal:1280},
+          height:{ideal:720},
+          frameRate:{ideal:30,max:30}
         }
       });
 
@@ -2009,8 +2038,18 @@
       rdLastNumber='';
       rdSameCount=0;
 
-      rdScanStatus('🔎 Looking only for RD account number starting with 6058…');
+      // Start OCR worker once; subsequent scans reuse it.
+      const ready=await prepareRDOCR();
+
+      if(!ready){
+        stopRDScanner();
+        alert('Fast OCR could not start. Please reload the page.');
+        return;
+      }
+
+      rdScanStatus('⚡ SUPER FAST: looking for RD 6058…');
       rdScanLoop();
+
     }catch(err){
       console.error('Camera error:',err);
       document.getElementById('rdScanModal')?.classList.remove('active');
@@ -2045,6 +2084,11 @@
     rdLastNumber='';
     rdSameCount=0;
   }
+
+
+  window.addEventListener('beforeunload',()=>{
+    try{ rdOCRWorker?.terminate(); }catch(_){}
+  });
 
   // Compatibility: existing calls now use our scanner, never Google Lens.
   function openGoogleLensOrCamera(){
